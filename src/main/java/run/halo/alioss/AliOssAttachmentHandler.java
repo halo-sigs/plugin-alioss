@@ -11,14 +11,12 @@ import com.aliyun.oss.model.StorageClass;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
-import java.net.MalformedURLException;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.UUID;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.http.client.utils.URIBuilder;
+import org.pf4j.Extension;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.UriUtils;
@@ -33,6 +31,7 @@ import run.halo.app.extension.Metadata;
 import run.halo.app.infra.utils.JsonUtils;
 
 @Slf4j
+@Extension
 public class AliOssAttachmentHandler implements AttachmentHandler {
 
     private static final String OBJECT_KEY = "alioss.plugin.halo.run/object-key";
@@ -44,9 +43,9 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
 
         return upload(uploadOption, properties)
             .map(objectDetail -> {
-                var host = properties.getBucket() + "/" + properties.getEndpoint();
-                var externalLink = String.join("/",
-                    properties.getProtocol().toString(), host, objectDetail.objectName());
+                var host = properties.getBucket() + "." + properties.getEndpoint();
+                var externalLink =
+                    properties.getProtocol() + "://" + host + "/" + objectDetail.objectName();
 
                 var metadata = new Metadata();
                 metadata.setName(UUID.randomUUID().toString());
