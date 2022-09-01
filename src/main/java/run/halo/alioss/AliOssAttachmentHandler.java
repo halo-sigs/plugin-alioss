@@ -27,6 +27,7 @@ import run.halo.app.core.extension.attachment.Attachment;
 import run.halo.app.core.extension.attachment.Attachment.AttachmentSpec;
 import run.halo.app.core.extension.attachment.Constant;
 import run.halo.app.core.extension.attachment.endpoint.AttachmentHandler;
+import run.halo.app.extension.ConfigMap;
 import run.halo.app.extension.Metadata;
 import run.halo.app.infra.utils.JsonUtils;
 
@@ -38,34 +39,46 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
 
     @Override
     public Mono<Attachment> upload(UploadOption uploadOption) {
-        var settingJson = uploadOption.configMap().getData().getOrDefault("default", "{}");
-        var properties = JsonUtils.jsonToObject(settingJson, AliOssProperties.class);
-
-        return upload(uploadOption, properties)
-            .map(objectDetail -> {
-                var host = properties.getBucket() + "." + properties.getEndpoint();
-                var externalLink =
-                    properties.getProtocol() + "://" + host + "/" + objectDetail.objectName();
-
-                var metadata = new Metadata();
-                metadata.setName(UUID.randomUUID().toString());
-                metadata.setAnnotations(Map.of(
-                    OBJECT_KEY, objectDetail.objectName(),
-                    Constant.EXTERNAL_LINK_ANNO_KEY,
-                    UriUtils.encodePath(externalLink, StandardCharsets.UTF_8)
-                ));
-
-                var objectMetadata = objectDetail.objectMetadata();
-                var spec = new AttachmentSpec();
-                spec.setSize(objectMetadata.getContentLength());
-                spec.setDisplayName(uploadOption.file().filename());
-                spec.setMediaType(objectMetadata.getContentType());
-
-                var attachment = new Attachment();
-                attachment.setMetadata(metadata);
-                attachment.setSpec(spec);
-                return attachment;
+        return Mono.just(uploadOption)
+            .filter(this::shouldHandle)
+            .flatMap(option -> {
+                final var properties = getProperties(option.configMap());
+                return upload(option, properties)
+                    .map(objectDetail -> this.buildAttachment(option, properties, objectDetail));
             });
+    }
+
+    AliOssProperties getProperties(ConfigMap configMap) {
+        var settingJson = configMap.getData().getOrDefault("default", "{}");
+        return JsonUtils.jsonToObject(settingJson, AliOssProperties.class);
+    }
+
+    Attachment buildAttachment(UploadOption option,
+                               AliOssProperties properties,
+                               ObjectDetail objectDetail) {
+        var host = properties.getBucket() + "." + properties.getEndpoint();
+        var externalLink =
+            properties.getProtocol() + "://" + host + "/" +
+                objectDetail.objectName();
+
+        var metadata = new Metadata();
+        metadata.setName(UUID.randomUUID().toString());
+        metadata.setAnnotations(Map.of(
+            OBJECT_KEY, objectDetail.objectName(),
+            Constant.EXTERNAL_LINK_ANNO_KEY,
+            UriUtils.encodePath(externalLink, StandardCharsets.UTF_8)
+        ));
+
+        var objectMetadata = objectDetail.objectMetadata();
+        var spec = new AttachmentSpec();
+        spec.setSize(objectMetadata.getContentLength());
+        spec.setDisplayName(option.file().filename());
+        spec.setMediaType(objectMetadata.getContentType());
+
+        var attachment = new Attachment();
+        attachment.setMetadata(metadata);
+        attachment.setSpec(spec);
+        return attachment;
     }
 
     Mono<ObjectDetail> upload(UploadOption uploadOption, AliOssProperties properties) {
@@ -137,6 +150,17 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
                 }
             })
             .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private boolean shouldHandle(UploadOption option) {
+        var policy = option.policy();
+        if (policy == null
+            || policy.getSpec() == null
+            || policy.getSpec().getTemplateRef() == null) {
+            return false;
+        }
+        var templateRef = policy.getSpec().getTemplateRef();
+        return "alioss".equals(templateRef.getName());
     }
 
     record ObjectDetail(String bucketName, String objectName, ObjectMetadata objectMetadata) {
