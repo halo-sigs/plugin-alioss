@@ -26,7 +26,7 @@ spec:
         name: accessKey
         label: Access Key
         validation: required
-      - $formkit: text
+      - $formkit: password
         name: accessSecret
         label: Access Secret
         validation: required
