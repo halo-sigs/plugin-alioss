@@ -22,7 +22,7 @@ spec:
         name: endpoint
         label: EndPoint
         validation: required
-      - $formkit: text
+      - $formkit: password
         name: accessKey
         label: Access Key
         validation: required
