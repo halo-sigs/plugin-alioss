@@ -21,6 +21,7 @@ import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
 import org.pf4j.Extension;
 import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.util.StringUtils;
 import org.springframework.web.util.UriUtils;
 import reactor.core.Exceptions;
 import reactor.core.publisher.Mono;
@@ -107,8 +108,9 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
     Attachment buildAttachment(UploadContext uploadContext, AliOssProperties properties,
                                ObjectDetail objectDetail) {
         var host = properties.getBucket() + "." + properties.getEndpoint();
-        var externalLink =
-            properties.getProtocol() + "://" + host + "/" + objectDetail.objectName();
+        var externalLink = properties.getProtocol() + "://" +
+                (StringUtils.hasText(properties.getDomain()) ? properties.getDomain() : host) +
+                "/" + objectDetail.objectName();
 
         var metadata = new Metadata();
         metadata.setName(UUID.randomUUID().toString());
