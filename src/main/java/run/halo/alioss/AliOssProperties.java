@@ -41,4 +41,19 @@ class AliOssProperties {
     public void setEndpoint(String endpoint) {
         this.endpoint = UrlUtils.removeHttpPrefix(endpoint);
     }
+
+    public void setLocation(String location) {
+        final var fileSeparator = "/";
+        if (StringUtils.hasText(location)) {
+            if (location.startsWith(fileSeparator)) {
+                location = location.substring(1);
+            }
+            if (location.endsWith(fileSeparator)) {
+                location = location.substring(0, location.length() - 1);
+            }
+        } else {
+            location = "";
+        }
+        this.location = location;
+    }
 }
