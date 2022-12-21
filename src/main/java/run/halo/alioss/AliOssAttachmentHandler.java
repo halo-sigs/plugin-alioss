@@ -4,6 +4,9 @@ import com.aliyun.oss.ClientException;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.OSSException;
+import com.aliyun.oss.common.auth.DefaultCredentialProvider;
+import com.aliyun.oss.common.comm.Protocol;
+import com.aliyun.oss.ClientBuilderConfiguration;
 import com.aliyun.oss.internal.OSSHeaders;
 import com.aliyun.oss.model.CannedAccessControlList;
 import com.aliyun.oss.model.ObjectMetadata;
@@ -131,8 +134,14 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
     }
 
     OSS buildOss(AliOssProperties properties) {
-        return new OSSClientBuilder().build(properties.getEndpoint(), properties.getAccessKey(),
-            properties.getAccessSecret());
+        var config = new ClientBuilderConfiguration();
+        config.setProtocol(Protocol.HTTPS);
+        return OSSClientBuilder.create()
+                .endpoint(properties.getEndpoint())
+                .credentialsProvider(new DefaultCredentialProvider(properties.getAccessKey(),
+                        properties.getAccessSecret()))
+                .clientConfiguration(config)
+                .build();
     }
 
     Mono<ObjectDetail> upload(UploadContext uploadContext, AliOssProperties properties) {
