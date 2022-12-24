@@ -35,13 +35,25 @@ class AliOssProperties {
     }
 
     public void setDomain(String domain) {
-        if (domain != null){
-            if (domain.toLowerCase().startsWith("http://")){
-                domain = domain.substring(7);
-            } else if (domain.toLowerCase().startsWith("https://")) {
-                domain = domain.substring(8);
+        this.domain = UrlUtils.removeHttpPrefix(domain);
+    }
+
+    public void setEndpoint(String endpoint) {
+        this.endpoint = UrlUtils.removeHttpPrefix(endpoint);
+    }
+
+    public void setLocation(String location) {
+        final var fileSeparator = "/";
+        if (StringUtils.hasText(location)) {
+            if (location.startsWith(fileSeparator)) {
+                location = location.substring(1);
             }
+            if (location.endsWith(fileSeparator)) {
+                location = location.substring(0, location.length() - 1);
+            }
+        } else {
+            location = "";
         }
-        this.domain = domain;
+        this.location = location;
     }
 }
