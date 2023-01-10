@@ -78,11 +78,11 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
                     log.info("{}/{} was deleted successfully from AliOSS", properties.getBucket(),
                         objectName);
                     return result;
-                }, oss::shutdown);
+                }, oss::shutdown, null);
             }).map(DeleteContext::attachment);
     }
 
-    <T> T ossExecute(Supplier<T> runnable, Runnable finalizer) {
+    <T> T ossExecute(Supplier<T> runnable, Runnable finalizer, Runnable exceptionHandler) {
         try {
             return runnable.get();
         } catch (OSSException oe) {
@@ -91,6 +91,9 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
                 rejected with an error response for some reason. 
                 Error message: {}, error code: {}, request id: {}, host id: {}
                 """, oe.getErrorCode(), oe.getErrorCode(), oe.getRequestId(), oe.getHostId());
+            if (exceptionHandler != null) {
+                exceptionHandler.run();
+            }
             throw Exceptions.propagate(oe);
         } catch (ClientException ce) {
             log.error("""
@@ -98,6 +101,9 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
                 problem while trying to communicate with OSS, such as not being able to access 
                 the network.
                 """);
+            if (exceptionHandler != null) {
+                exceptionHandler.run();
+            }
             throw Exceptions.propagate(ce);
         } finally {
             if (finalizer != null) {
@@ -159,10 +165,14 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
             }
             var client = buildOss(properties);
             // check whether file exists
-            var objectExist = ossExecute(() -> client.doesObjectExist(properties.getBucket(), objectName), null);
+            var objectExist = ossExecute(() -> client.doesObjectExist(properties.getBucket(), objectName), null,
+                    () -> {
+                        uploadingFile.remove(uploadingMapKey);
+                        client.shutdown();
+                    });
             if (objectExist) {
-                client.shutdown();
                 uploadingFile.remove(uploadingMapKey);
+                client.shutdown();
                 throw new ServerWebInputException("文件 " + originFilename + " 已存在，建议更名后重试。");
             }
 
@@ -198,7 +208,7 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
             }, () -> {
                 uploadingFile.remove(uploadingMapKey);
                 client.shutdown();
-            });
+            }, null);
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
