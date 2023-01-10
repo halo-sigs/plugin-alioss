@@ -20,11 +20,13 @@ import java.io.PipedOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
 import org.pf4j.Extension;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.util.StringUtils;
+import org.springframework.web.server.ServerWebInputException;
 import org.springframework.web.util.UriUtils;
 import reactor.core.Exceptions;
 import reactor.core.publisher.Mono;
@@ -43,6 +45,7 @@ import run.halo.app.infra.utils.JsonUtils;
 public class AliOssAttachmentHandler implements AttachmentHandler {
 
     private static final String OBJECT_KEY = "alioss.plugin.halo.run/object-key";
+    private final Map<String, Object> uploadingFile = new ConcurrentHashMap<>();
 
     @Override
     public Mono<Attachment> upload(UploadContext uploadContext) {
@@ -146,9 +149,22 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
 
     Mono<ObjectDetail> upload(UploadContext uploadContext, AliOssProperties properties) {
         return Mono.fromCallable(() -> {
-            var client = buildOss(properties);
             // build object name
-            var objectName = properties.getObjectName(uploadContext.file().filename());
+            var originFilename = uploadContext.file().filename();
+            var objectName = properties.getObjectName(originFilename);
+            // deduplication of uploading files
+            var uploadingMapKey = properties.getBucket() + "/" + objectName;
+            if (uploadingFile.put(uploadingMapKey, uploadingMapKey) != null) {
+                throw new ServerWebInputException("文件 " + originFilename + " 已存在，建议更名后重试。");
+            }
+            var client = buildOss(properties);
+            // check whether file exists
+            var objectExist = ossExecute(() -> client.doesObjectExist(properties.getBucket(), objectName), null);
+            if (objectExist) {
+                client.shutdown();
+                uploadingFile.remove(uploadingMapKey);
+                throw new ServerWebInputException("文件 " + originFilename + " 已存在，建议更名后重试。");
+            }
 
             var pos = new PipedOutputStream();
             var pis = new PipedInputStream(pos);
@@ -179,7 +195,10 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
                 }
                 var objectMetadata = client.getObjectMetadata(bucket, objectName);
                 return new ObjectDetail(bucket, objectName, objectMetadata);
-            }, client::shutdown);
+            }, () -> {
+                uploadingFile.remove(uploadingMapKey);
+                client.shutdown();
+            });
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
