@@ -20,11 +20,13 @@ import java.io.PipedOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
 import org.pf4j.Extension;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.util.StringUtils;
+import org.springframework.web.server.ServerWebInputException;
 import org.springframework.web.util.UriUtils;
 import reactor.core.Exceptions;
 import reactor.core.publisher.Mono;
@@ -43,6 +45,7 @@ import run.halo.app.infra.utils.JsonUtils;
 public class AliOssAttachmentHandler implements AttachmentHandler {
 
     private static final String OBJECT_KEY = "alioss.plugin.halo.run/object-key";
+    private final Map<String, Object> uploadingFile = new ConcurrentHashMap<>();
 
     @Override
     public Mono<Attachment> upload(UploadContext uploadContext) {
@@ -75,11 +78,11 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
                     log.info("{}/{} was deleted successfully from AliOSS", properties.getBucket(),
                         objectName);
                     return result;
-                }, oss::shutdown);
+                }, oss::shutdown, null);
             }).map(DeleteContext::attachment);
     }
 
-    <T> T ossExecute(Supplier<T> runnable, Runnable finalizer) {
+    <T> T ossExecute(Supplier<T> runnable, Runnable finalizer, Runnable exceptionHandler) {
         try {
             return runnable.get();
         } catch (OSSException oe) {
@@ -88,6 +91,9 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
                 rejected with an error response for some reason. 
                 Error message: {}, error code: {}, request id: {}, host id: {}
                 """, oe.getErrorCode(), oe.getErrorCode(), oe.getRequestId(), oe.getHostId());
+            if (exceptionHandler != null) {
+                exceptionHandler.run();
+            }
             throw Exceptions.propagate(oe);
         } catch (ClientException ce) {
             log.error("""
@@ -95,6 +101,9 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
                 problem while trying to communicate with OSS, such as not being able to access 
                 the network.
                 """);
+            if (exceptionHandler != null) {
+                exceptionHandler.run();
+            }
             throw Exceptions.propagate(ce);
         } finally {
             if (finalizer != null) {
@@ -146,9 +155,26 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
 
     Mono<ObjectDetail> upload(UploadContext uploadContext, AliOssProperties properties) {
         return Mono.fromCallable(() -> {
-            var client = buildOss(properties);
             // build object name
-            var objectName = properties.getObjectName(uploadContext.file().filename());
+            var originFilename = uploadContext.file().filename();
+            var objectName = properties.getObjectName(originFilename);
+            // deduplication of uploading files
+            var uploadingMapKey = properties.getBucket() + "/" + objectName;
+            if (uploadingFile.put(uploadingMapKey, uploadingMapKey) != null) {
+                throw new ServerWebInputException("文件 " + originFilename + " 已存在，建议更名后重试。");
+            }
+            var client = buildOss(properties);
+            // check whether file exists
+            var objectExist = ossExecute(() -> client.doesObjectExist(properties.getBucket(), objectName), null,
+                    () -> {
+                        uploadingFile.remove(uploadingMapKey);
+                        client.shutdown();
+                    });
+            if (objectExist) {
+                uploadingFile.remove(uploadingMapKey);
+                client.shutdown();
+                throw new ServerWebInputException("文件 " + originFilename + " 已存在，建议更名后重试。");
+            }
 
             var pos = new PipedOutputStream();
             var pis = new PipedInputStream(pos);
@@ -179,7 +205,10 @@ public class AliOssAttachmentHandler implements AttachmentHandler {
                 }
                 var objectMetadata = client.getObjectMetadata(bucket, objectName);
                 return new ObjectDetail(bucket, objectName, objectMetadata);
-            }, client::shutdown);
+            }, () -> {
+                uploadingFile.remove(uploadingMapKey);
+                client.shutdown();
+            }, null);
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
