@@ -16,4 +16,5 @@ spec:
   displayName: "阿里云 OSS"
   description: "提供阿里云 OSS 的存储策略"
   license:
-    - name: "MIT"
+    - name: "GPL-3.0"
+      url: "https://github.com/halo-sigs/plugin-alioss/blob/main/LICENSE"
