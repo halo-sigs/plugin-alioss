@@ -1,6 +1,6 @@
 # plugin-alioss
 
-为 Halo 2.0 提供阿里云 OSS 的存储策略
+:warning:【过时】为 Halo 2.0 提供阿里云 OSS 的存储策略。请使用 S3 插件作为替代：<https://github.com/halo-sigs/plugin-s3>。
 
 ## 开发环境
 
